@@ -2,6 +2,8 @@ import { useState, useEffect } from 'react';
 import type { FormEvent } from 'react';
 import TaskItem from "./TaskItem";
 import type { Task, Board } from "./types";
+import { getJson } from "./api";
+
 
 function App() {
   const [tasks, setTasks] = useState<Task[]>([]);
@@ -12,28 +14,28 @@ function App() {
   const [boardId, setBoardId] = useState("");
 
   useEffect(() => {
-    fetch("/api/csrf_token")
-      .then((res) => res.json())
-      .then((data) => setCsrfToken(data.token));
+    getJson<{ token: string }>("/api/csrf_token")
+      .then((data) => setCsrfToken(data.token))
+      .catch((err) => console.error(err));
   }, []);
 
   useEffect(() => {
-    fetch("/api/tasks")
-      .then((res) => res.json())
-      .then((data) => {
-        setTasks(data);
-        setLoading(false);
-      });
+  getJson<Task[]>("/api/tasks")
+    .then((data) => {
+      setTasks(data);
+      setLoading(false);
+    })
+    .catch((err) => console.error(err));
   }, []);
 
   useEffect(() => {
-    fetch("/api/boards")
-      .then((res) => res.json())
-      .then((data) => {
-        setBoards(data);
-        if (data.length > 0) setBoardId(String(data[0].id));
-      });
-  }, []);
+  getJson<Board[]>("/api/boards")
+    .then((data) => {
+      setBoards(data);
+      if (data.length > 0) setBoardId(String(data[0].id));
+    })
+    .catch((err) => console.error(err));
+}, []);
 
   const toggleTask = (id: number) => {
     const task = tasks.find((t) => t.id === id);
