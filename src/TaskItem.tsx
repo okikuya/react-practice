@@ -1,4 +1,12 @@
-function TaskItem({ task, onToggle, onDelete }) {
+import type { Task } from './types'
+
+type Props = {
+  task: Task
+  onToggle: (id: number) => void
+  onDelete: (id: number) => void
+}
+
+function TaskItem({ task, onToggle, onDelete }: Props) {
   return (
     <div>
       <input
