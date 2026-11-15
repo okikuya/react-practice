@@ -37,6 +37,13 @@ function App() {
     .catch((err) => console.error(err));
 }, []);
 
+  // TODO(next): 同じタスクを素早く2回押すと、2回とも { done: true } が送られる。
+  // 送る値を「抱え込んだ古い tasks」から決めているため。setTasks を prev に
+  // しても直らない（直るのは画面の書き換えだけで、送る値は押した瞬間に決まる）。
+  // 直し方は3つ。A 送信中は押せなくする（2-5 の題材）/ B API をトグルにする
+  // （PATCH /tasks/:id/toggle。meal-requests の accept・complete と同じ形）/
+  // C 楽観的更新にして失敗時に巻き戻す。
+  // 再現: node ~/study-log/js-practice/closure-practice.js
   const toggleTask = (id: number) => {
     const task = tasks.find((t) => t.id === id);
     if (!task) return;
@@ -54,7 +61,7 @@ function App() {
         return res.json();
       })
       .then((updated) => {
-        setTasks(tasks.map((t) => (t.id === id ? updated : t)));
+        setTasks((prev) => prev.map((t) => (t.id === id ? updated : t)));
       })
       .catch((err) => console.error(err));
   };
@@ -66,7 +73,7 @@ function App() {
     })
       .then((res) => {
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        setTasks(tasks.filter((t) => t.id !== id));
+        setTasks((prev) => prev.filter((t) => t.id !== id));
       })
       .catch((err) => console.error(err));
   };
@@ -88,7 +95,7 @@ function App() {
         return res.json();
       })
       .then((created) => {
-        setTasks([...tasks, created]);
+        setTasks((prev) => [...prev, created]);
         setText("");
       })
       .catch((err) => console.error(err));
