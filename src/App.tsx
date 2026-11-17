@@ -4,11 +4,22 @@ import TaskItem from "./TaskItem";
 import type { Task, Board } from "./types";
 import { getJson } from "./api";
 import { useFetch } from "./useFetch";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 
 
 function App() {
-  const [tasks, setTasks] = useState<Task[]>([]);
-  const [loading, setLoading] = useState(true);
+  const queryClient = useQueryClient();
+
+  // queryKey はこのデータの名前（キャッシュの住所）。
+  // invalidateQueries で同じ名前を指せば、取り直しは任せられる。
+  const {
+    data: tasks = [],
+    isPending: loading,
+    isError: tasksFailed,
+  } = useQuery({
+    queryKey: ["tasks"],
+    queryFn: () => getJson<Task[]>("/api/tasks"),
+  });
   const [text, setText] = useState("");
   const [actionError, setActionError] = useState<string | null>(null);
   const {
@@ -18,15 +29,6 @@ function App() {
   const csrfToken = csrf?.token ?? "";
   const [boards, setBoards] = useState<Board[]>([]);
   const [boardId, setBoardId] = useState("");
-
-  useEffect(() => {
-  getJson<Task[]>("/api/tasks")
-    .then((data) => {
-      setTasks(data);
-      setLoading(false);
-    })
-    .catch((err) => console.error(err));
-  }, []);
 
   useEffect(() => {
   getJson<Board[]>("/api/boards")
@@ -57,11 +59,10 @@ function App() {
       body: JSON.stringify({ task: { done: !task.done } }),
     })
       .then((res) => {
+        // 返ってきた1件は使わない。invalidateQueries が一覧ごと取り直すため、
+        // res.json() で解析するだけ無駄になる。
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        return res.json();
-      })
-      .then((updated) => {
-        setTasks((prev) => prev.map((t) => (t.id === id ? updated : t)));
+        void queryClient.invalidateQueries({ queryKey: ["tasks"] });
       })
       .catch((err) => console.error(err));
   };
@@ -73,7 +74,7 @@ function App() {
     })
       .then((res) => {
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        setTasks((prev) => prev.filter((t) => t.id !== id));
+        void queryClient.invalidateQueries({ queryKey: ["tasks"] });
       })
       .catch((err) => console.error(err));
   };
@@ -92,11 +93,8 @@ function App() {
     })
       .then((res) => {
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        return res.json();
-      })
-      .then((created) => {
         setActionError(null);
-        setTasks((prev) => [...prev, created]);
+        void queryClient.invalidateQueries({ queryKey: ["tasks"] });
         setText("");
       })
       .catch((err) => setActionError(`追加できませんでした（${String(err)}）`));
@@ -112,6 +110,9 @@ function App() {
         <p style={{ color: "crimson" }}>
           送信の準備に失敗しました（{csrfError}）。再読み込みしてください。
         </p>
+      )}
+      {tasksFailed && (
+        <p style={{ color: "crimson" }}>一覧を取得できませんでした。</p>
       )}
       {actionError && <p style={{ color: "crimson" }}>{actionError}</p>}
 
