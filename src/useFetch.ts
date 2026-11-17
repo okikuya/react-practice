@@ -1,3 +1,15 @@
+// 【このファイルはもう使っていない】2026-11-17 に TanStack Query へ移行した。
+// 消さずに置いてあるのは、README の「2. カスタムHook に切り出せるものと、
+// 切り出せないもの」がこのコードを指しているため。学習の記録として残す。
+//
+// 分かったこと: data しか返していないので、取ってきた後に書き換えるもの
+// （/api/tasks）は切り出せなかった。setData も返せば切り出せるが、そこから
+// キャッシュ・再取得・画面間の共有と増え続ける。それを引き受けるのが
+// TanStack Query だった。
+//
+// いま同じことをするなら:
+//   useQuery({ queryKey: ["csrf_token"], queryFn: () => getJson(...) })
+
 import { useState, useEffect } from "react";
 import { getJson } from "./api";
 

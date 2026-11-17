@@ -1,17 +1,23 @@
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import type { FormEvent } from 'react';
 import TaskItem from "./TaskItem";
 import type { Task, Board } from "./types";
 import { getJson, sendJson } from "./api";
-import { useFetch } from "./useFetch";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 
 
 function App() {
   const queryClient = useQueryClient();
 
-  // queryKey はこのデータの名前（キャッシュの住所）。
-  // invalidateQueries で同じ名前を指せば、取り直しは任せられる。
+  // staleTime は「何秒キャッシュを信じるか」。既定は 0（取った瞬間から古い扱い）。
+  // 書き込み後は invalidateQueries が必ず取り直すので、この値が効くのは
+  // 「別のタブから戻ってきたとき」だけ。だから基準は「誰が変えるか」。
+  //
+  //   実測 2026-11-17（window に visibilitychange を送って計測）
+  //     staleTime 既定(0)  合図4回 → 4件 取り直し
+  //     staleTime 30秒     合図4回 → 0件 ／ 約35秒後に1回 → 1件
+
+  // tasks は他人も変える。戻ってきたら気づきたいので 0（既定）のまま。
   const {
     data: tasks = [],
     isPending: loading,
@@ -21,24 +27,31 @@ function App() {
     queryFn: () => getJson<Task[]>("/api/tasks"),
   });
 
+  // boards はめったに変わらない。
+  const { data: boards = [] } = useQuery({
+    queryKey: ["boards"],
+    queryFn: () => getJson<Board[]>("/api/boards"),
+    staleTime: 5 * 60_000,
+  });
+
+  // csrf トークンはセッション中ずっと同じ。取り直す理由が無い。
+  const { data: csrf, error: csrfError } = useQuery({
+    queryKey: ["csrf_token"],
+    queryFn: () => getJson<{ token: string }>("/api/csrf_token"),
+    staleTime: Infinity,
+  });
+  const csrfToken = csrf?.token ?? "";
+
   const [text, setText] = useState("");
   const [actionError, setActionError] = useState<string | null>(null);
-  const {
-    data: csrf,
-    error: csrfError,
-  } = useFetch<{ token: string }>("/api/csrf_token");
-  const csrfToken = csrf?.token ?? "";
-  const [boards, setBoards] = useState<Board[]>([]);
-  const [boardId, setBoardId] = useState("");
 
-  useEffect(() => {
-  getJson<Board[]>("/api/boards")
-    .then((data) => {
-      setBoards(data);
-      if (data.length > 0) setBoardId(String(data[0].id));
-    })
-    .catch((err) => console.error(err));
-}, []);
+  // 「まだ選んでいない」だけを state に持ち、表示する値は毎回計算する。
+  // 以前は useEffect の中で setBoardId(data[0].id) と“写して”いた。
+  // useQuery の data は写せない（setBoards が無い）ので、写すのをやめた。
+  // 第21章で /api/boards を「△ おまけがあるので切り出せない」とした
+  // 理由が、これで消える。state が1つ減る。
+  const [selectedBoardId, setSelectedBoardId] = useState("");
+  const boardId = selectedBoardId || String(boards[0]?.id ?? "");
 
   const invalidateTasks = () =>
     void queryClient.invalidateQueries({ queryKey: ["tasks"] });
@@ -116,7 +129,7 @@ function App() {
 
       {csrfError && (
         <p style={{ color: "crimson" }}>
-          送信の準備に失敗しました（{csrfError}）。再読み込みしてください。
+          送信の準備に失敗しました（{csrfError.message}）。再読み込みしてください。
         </p>
       )}
       {tasksFailed && (
@@ -125,7 +138,10 @@ function App() {
       {actionError && <p style={{ color: "crimson" }}>{actionError}</p>}
 
       <form onSubmit={addTask}>
-        <select value={boardId} onChange={(e) => setBoardId(e.target.value)}>
+        <select
+          value={boardId}
+          onChange={(e) => setSelectedBoardId(e.target.value)}
+        >
           {boards.map((board) => (
             <option key={board.id} value={board.id}>
               {board.title}
