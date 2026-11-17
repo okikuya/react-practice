@@ -11,8 +11,11 @@ function App() {
   const [loading, setLoading] = useState(true);
   const [text, setText] = useState("");
   const [actionError, setActionError] = useState<string | null>(null);
-  const { data } = useFetch<{ token: string }>("/api/csrf_token");
-  const csrfToken = data?.token ?? "";
+  const {
+    data: csrf,
+    error: csrfError,
+  } = useFetch<{ token: string }>("/api/csrf_token");
+  const csrfToken = csrf?.token ?? "";
   const [boards, setBoards] = useState<Board[]>([]);
   const [boardId, setBoardId] = useState("");
 
@@ -105,6 +108,11 @@ function App() {
     <>
       <h1>タスク一覧</h1>
 
+      {csrfError && (
+        <p style={{ color: "crimson" }}>
+          送信の準備に失敗しました（{csrfError}）。再読み込みしてください。
+        </p>
+      )}
       {actionError && <p style={{ color: "crimson" }}>{actionError}</p>}
 
       <form onSubmit={addTask}>
@@ -121,7 +129,9 @@ function App() {
           onChange={(e) => setText(e.target.value)}
           placeholder="タスクを入力"
         />
-        <button type="submit">追加</button>
+        <button type="submit" disabled={!csrfToken}>
+          {csrfToken ? "追加" : "準備中…"}
+        </button>
       </form>
 
       {tasks.map((task) => (
