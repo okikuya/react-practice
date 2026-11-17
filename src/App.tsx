@@ -3,21 +3,18 @@ import type { FormEvent } from 'react';
 import TaskItem from "./TaskItem";
 import type { Task, Board } from "./types";
 import { getJson } from "./api";
+import { useFetch } from "./useFetch";
 
 
 function App() {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [loading, setLoading] = useState(true);
   const [text, setText] = useState("");
-  const [csrfToken, setCsrfToken] = useState("");
+  const [actionError, setActionError] = useState<string | null>(null);
+  const { data } = useFetch<{ token: string }>("/api/csrf_token");
+  const csrfToken = data?.token ?? "";
   const [boards, setBoards] = useState<Board[]>([]);
   const [boardId, setBoardId] = useState("");
-
-  useEffect(() => {
-    getJson<{ token: string }>("/api/csrf_token")
-      .then((data) => setCsrfToken(data.token))
-      .catch((err) => console.error(err));
-  }, []);
 
   useEffect(() => {
   getJson<Task[]>("/api/tasks")
@@ -95,10 +92,11 @@ function App() {
         return res.json();
       })
       .then((created) => {
+        setActionError(null);
         setTasks((prev) => [...prev, created]);
         setText("");
       })
-      .catch((err) => console.error(err));
+      .catch((err) => setActionError(`追加できませんでした（${String(err)}）`));
   };
 
   if (loading) return <p>読み込み中...</p>;
@@ -106,6 +104,8 @@ function App() {
   return (
     <>
       <h1>タスク一覧</h1>
+
+      {actionError && <p style={{ color: "crimson" }}>{actionError}</p>}
 
       <form onSubmit={addTask}>
         <select value={boardId} onChange={(e) => setBoardId(e.target.value)}>
