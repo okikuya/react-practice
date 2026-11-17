@@ -1,16 +1,150 @@
-# React + Vite
+# react-practice
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+Rails API（`board_app`・非公開）に React + TypeScript の
+フロントエンドをつないだ練習用リポジトリ。タスクの一覧・追加・完了切替・削除ができる。
 
-Currently, two official plugins are available:
+**学習の記録を目的にしている。** 作り終えた成果物ではなく、
+**何を間違えて、どう確かめて直したか**を残すために公開している。
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+実務想定のポートフォリオは別にある（`meal-requests`・現在は非公開。応募時に個別に公開）。
 
-## React Compiler
+## 構成
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+```
+localhost:5173 (Vite + React)
+      │  /api/* を proxy
+      ▼
+localhost:3000 (Rails / board_app)
+```
 
-## Expanding the ESLint configuration
+| | |
+|---|---|
+| React | 19 |
+| TypeScript | 7 |
+| ビルド | Vite 8 |
+| 状態管理 | `useState` のみ（ライブラリ無し） |
+| API | `fetch` + 型付きヘルパー（`src/api.ts`） |
 
-If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and [`typescript-eslint`](https://typescript-eslint.io) in your project.
+## 動かし方
+
+Rails 側（`board_app`）を `:3000` で起動し、ログインしておく。
+`/api/tasks` には `authenticate_user!` が付いているため。
+
+```bash
+npm install
+npm run dev
+```
+
+```bash
+npx tsc --noEmit && npm run lint
+```
+
+## 分かったことの記録
+
+### 1. 古い state を抱え込んだまま送ってしまう（stale closure）
+
+```ts
+setTasks(tasks.map(...))        // ✗ この描画時点の tasks を抱え込む
+setTasks((prev) => prev.map(...)) // ○ 最新を受け取る
+```
+
+**2件を素早く操作すると、後から返ってきた応答が先の結果を上書きする。**
+React も TypeScript も何も言わない。
+
+`prev` で直るのは**画面の書き換えだけ**で、**送る値は直らない。**
+
+```ts
+body: JSON.stringify({ task: { done: !task.done } })
+//                                  ^^^^^^^^^^^ 押した瞬間に、古い配列から決まる
+```
+
+同じタスクを素早く2回押すと `{ done: true }` が2回飛ぶ。
+サーバーもライブラリも無しで再現できる形にしてある（`closure-practice.js`・学習ログ側に保管）。
+
+### 2. カスタムHook に切り出せるものと、切り出せないもの
+
+`useEffect` が3つ同じ形に見えたので、1つの `useFetch` にまとめようとした。
+**まとめられたのは1つだけだった。**
+
+| エンドポイント | 取ってきた後 | |
+|---|---|---|
+| `/api/csrf_token` | 読むだけ | ✅ |
+| `/api/tasks` | `addTask` / `toggleTask` / `deleteTask` が**書き換える** | ❌ |
+| `/api/boards` | 一覧は読むだけ。`setBoardId` のおまけがある | △ |
+
+理由は [`useFetch`](src/useFetch.ts) の最後の1行にある。
+
+```ts
+return { data, loading, error };  // setData は返していない
+```
+
+実際に `/api/tasks` を差し替えて `tsc` を走らせると**エラーが10個**出る。
+ただし**原因は2つ**（`setTasks` が無い／`tasks` が `null` かもしれない）で、
+残り6個は巻き添え。
+
+> **カスタムHook に切り出せるのは「取ってきて、表示するだけ」のもの。**
+
+この先（キャッシュ・再取得・画面間の共有）を自前でやると雪だるま式に増える。
+それを引き受ける既製品が TanStack Query で、**使う前に、なぜ要るのかを手で確かめた。**
+
+### 3. `tsc` 緑・`lint` 緑・テスト0本
+
+差し替えの前後どちらも `tsc` と `lint` は緑だった。**その緑のまま、バグは在った。**
+
+CSRFトークンは届くまで `""` なので、その間に「追加」を押すと `POST` が **422** で落ちる。
+そして `catch` がこうだった。
+
+```ts
+.catch((err) => console.error(err));
+```
+
+**画面には何も出ない。** 入力欄に文字が残り、一覧は増えず、エラーも無い。
+利用者からは「ボタンが効かない」としか見えない。
+`console.error` は DevTools を開いている人にしか見えない。
+
+#### 確かめ方
+
+いきなり画面を触らず、**基準（対照実験）を先に取った。**
+
+```
+空トークンで直接 POST      -> 422
+正しいトークンで直接 POST  -> 201
+```
+
+そのうえで Rails 側の `/api/csrf_token` に `sleep` を仕込んで再現した。
+**1回目は再現しなかった**（ブラウザ操作を別々の呼び出しに分けていて、
+押すまでに `sleep` より長い時間が経っていた）。
+基準があったので「出ないのはおかしい」と判断でき、やり方のほうを直せた。
+
+> **再現しないときは、まず実験のやり方を疑う。そのために基準を先に取る。**
+
+#### 直し方を2段階に分けた
+
+| | 役割 |
+|---|---|
+| 失敗を画面に出す | 防げなかった失敗を**見せる** |
+| 届くまで押せなくする | 防げる失敗を**防ぐ** |
+
+`disabled` の条件には `useFetch` の `loading` を**使っていない。**
+
+| | 取得成功 | 取得失敗 |
+|---|---|---|
+| `loading` | false | **false** |
+| `token` | 入る | **`""` のまま** |
+
+`loading` で判定すると、失敗したときに押せてしまい 422 に戻る。
+`disabled={!csrfToken}` にした。
+
+> **「終わったか」と「使えるか」は別の質問。**
+
+## まだ無いもの
+
+理由があって手を付けていないもの。
+
+| | 状況 |
+|---|---|
+| テスト | **0本。** 上の3件はすべてブラウザを開いて見つけた |
+| 同じタスクの連打 | `{ done: true }` が2回飛ぶ。`src/App.tsx` に `TODO` として理由と直し方3つを書いてある |
+| `/api/boards` の差し替え | `setBoardId` の副作用があるため保留 |
+| ルーティング | 画面が1つなので未導入 |
+| 本番デプロイ | 練習用のため未実施 |
