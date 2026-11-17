@@ -22,6 +22,7 @@ function App() {
     data: tasks = [],
     isPending: loading,
     isError: tasksFailed,
+    failureCount: tasksRetries,
   } = useQuery({
     queryKey: ["tasks"],
     queryFn: () => getJson<Task[]>("/api/tasks"),
@@ -121,7 +122,17 @@ function App() {
     ? deleteMutation.variables
     : undefined;
 
-  if (loading) return <p>読み込み中...</p>;
+  // 「一覧が空っぽに見える」状態は3つあり、言うべきことが違う。
+  //   loading      まだ分からない
+  //   tasksFailed  壊れている（0件ではない）
+  //   0件          正常。ただし空
+  // 以前はここで `if (loading) return <p>読み込み中...</p>` と早めに返していた。
+  // そのせいで読み込み中は csrfError も actionError もフォームも出なかった。
+  const isEmpty = !loading && !tasksFailed && tasks.length === 0;
+
+  // boards がまだ来ていない、または1つも無いと boardId が "" になる。
+  // そのまま送ると POST /api/boards//tasks になる。
+  const canSubmit = Boolean(csrfToken) && Boolean(boardId) && !addMutation.isPending;
 
   return (
     <>
@@ -154,13 +165,28 @@ function App() {
           onChange={(e) => setText(e.target.value)}
           placeholder="タスクを入力"
         />
-        <button
-          type="submit"
-          disabled={!csrfToken || addMutation.isPending}
-        >
-          {!csrfToken ? "準備中…" : addMutation.isPending ? "追加中…" : "追加"}
+        <button type="submit" disabled={!canSubmit}>
+          {addMutation.isPending ? "追加中…" : canSubmit ? "追加" : "準備中…"}
         </button>
       </form>
+
+      {/*
+        既定では失敗しても3回まで自動で再試行する（待ちは 1→2→4 秒）。
+        実測 2026-11-17: /api/tasks を 500 にすると
+          176ms 試行1 ／ 1182ms 試行2 ／ 3190ms 試行3 ／ 7213ms 試行4 でエラー表示
+        つまり「読み込み中…」のまま7.2秒放置されていた。
+        failureCount を出せば、黙って待たせずに済む。
+      */}
+      {loading &&
+        (tasksRetries > 0 ? (
+          <p>つながりません。再試行中…（{tasksRetries}回目）</p>
+        ) : (
+          <p>読み込み中…</p>
+        ))}
+
+      {isEmpty && (
+        <p>タスクはまだありません。上のフォームから追加できます。</p>
+      )}
 
       {tasks.map((task) => (
         <TaskItem
