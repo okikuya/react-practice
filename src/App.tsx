@@ -2,9 +2,9 @@ import { useState, useEffect } from 'react';
 import type { FormEvent } from 'react';
 import TaskItem from "./TaskItem";
 import type { Task, Board } from "./types";
-import { getJson } from "./api";
+import { getJson, sendJson } from "./api";
 import { useFetch } from "./useFetch";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 
 
 function App() {
@@ -20,6 +20,7 @@ function App() {
     queryKey: ["tasks"],
     queryFn: () => getJson<Task[]>("/api/tasks"),
   });
+
   const [text, setText] = useState("");
   const [actionError, setActionError] = useState<string | null>(null);
   const {
@@ -39,66 +40,73 @@ function App() {
     .catch((err) => console.error(err));
 }, []);
 
-  // TODO(next): 同じタスクを素早く2回押すと、2回とも { done: true } が送られる。
-  // 送る値を「抱え込んだ古い tasks」から決めているため。setTasks を prev に
-  // しても直らない（直るのは画面の書き換えだけで、送る値は押した瞬間に決まる）。
-  // 直し方は3つ。A 送信中は押せなくする（2-5 の題材）/ B API をトグルにする
-  // （PATCH /tasks/:id/toggle。meal-requests の accept・complete と同じ形）/
-  // C 楽観的更新にして失敗時に巻き戻す。
-  // 再現: node ~/study-log/js-practice/closure-practice.js
+  const invalidateTasks = () =>
+    void queryClient.invalidateQueries({ queryKey: ["tasks"] });
+
+  // useMutation にすると、失敗したときの置き場所が onError に決まる。
+  // 自分で書いた .catch は、書き忘れても何も言われない（2026-11-17 に
+  // addTask だけ直して toggleTask と deleteTask を2か所残していた）。
+  const addMutation = useMutation({
+    mutationFn: (title: string) =>
+      sendJson("POST", `/api/boards/${boardId}/tasks`, csrfToken, {
+        task: { title },
+      }),
+    onSuccess: () => {
+      setActionError(null);
+      setText("");
+      invalidateTasks();
+    },
+    onError: (err) => setActionError(`追加できませんでした（${String(err)}）`),
+  });
+
+  const toggleMutation = useMutation({
+    mutationFn: ({ id, done }: { id: number; done: boolean }) =>
+      sendJson("PATCH", `/api/tasks/${id}`, csrfToken, { task: { done } }),
+    onSuccess: () => {
+      setActionError(null);
+      invalidateTasks();
+    },
+    onError: (err) => setActionError(`切り替えできませんでした（${String(err)}）`),
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: (id: number) => sendJson("DELETE", `/api/tasks/${id}`, csrfToken),
+    onSuccess: () => {
+      setActionError(null);
+      invalidateTasks();
+    },
+    onError: (err) => setActionError(`削除できませんでした（${String(err)}）`),
+  });
+
+  // 以前ここにあった TODO は解決した。
+  // 「同じタスクを素早く2回押すと { done: true } が2回送られる」問題は、
+  // 送信中そのタスクを押せなくすることで起きなくなる（直し方 A）。
+  // isPending は useMutation が持っているので、自前で
+  // const [sending, setSending] = useState(false) を書かなくていい。
+  // 再現実験は残してある: node ~/study-log/js-practice/closure-practice.js
   const toggleTask = (id: number) => {
     const task = tasks.find((t) => t.id === id);
     if (!task) return;
-
-    fetch(`/api/tasks/${id}`, {
-      method: "PATCH",
-      headers: {
-        "Content-Type": "application/json",
-        "X-CSRF-Token": csrfToken,
-      },
-      body: JSON.stringify({ task: { done: !task.done } }),
-    })
-      .then((res) => {
-        // 返ってきた1件は使わない。invalidateQueries が一覧ごと取り直すため、
-        // res.json() で解析するだけ無駄になる。
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        void queryClient.invalidateQueries({ queryKey: ["tasks"] });
-      })
-      .catch((err) => console.error(err));
+    toggleMutation.mutate({ id, done: !task.done });
   };
 
   const deleteTask = (id: number) => {
-    fetch(`/api/tasks/${id}`, {
-      method: "DELETE",
-      headers: { "X-CSRF-Token": csrfToken },
-    })
-      .then((res) => {
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        void queryClient.invalidateQueries({ queryKey: ["tasks"] });
-      })
-      .catch((err) => console.error(err));
+    deleteMutation.mutate(id);
   };
 
   const addTask = (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     if (text.trim() === "") return;
-
-    fetch(`/api/boards/${boardId}/tasks`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "X-CSRF-Token": csrfToken,
-      },
-      body: JSON.stringify({ task: { title: text } }),
-    })
-      .then((res) => {
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        setActionError(null);
-        void queryClient.invalidateQueries({ queryKey: ["tasks"] });
-        setText("");
-      })
-      .catch((err) => setActionError(`追加できませんでした（${String(err)}）`));
+    addMutation.mutate(text);
   };
+
+  // いま送信中のタスクはどれか。variables には最後に mutate へ渡した値が入る。
+  const togglingId = toggleMutation.isPending
+    ? toggleMutation.variables?.id
+    : undefined;
+  const deletingId = deleteMutation.isPending
+    ? deleteMutation.variables
+    : undefined;
 
   if (loading) return <p>読み込み中...</p>;
 
@@ -130,8 +138,11 @@ function App() {
           onChange={(e) => setText(e.target.value)}
           placeholder="タスクを入力"
         />
-        <button type="submit" disabled={!csrfToken}>
-          {csrfToken ? "追加" : "準備中…"}
+        <button
+          type="submit"
+          disabled={!csrfToken || addMutation.isPending}
+        >
+          {!csrfToken ? "準備中…" : addMutation.isPending ? "追加中…" : "追加"}
         </button>
       </form>
 
@@ -139,6 +150,7 @@ function App() {
         <TaskItem
           key={task.id}
           task={task}
+          busy={task.id === togglingId || task.id === deletingId}
           onToggle={toggleTask}
           onDelete={deleteTask}
         />
