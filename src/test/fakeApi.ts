@@ -65,7 +65,8 @@ export function installFakeApi(options: Options = {}): FakeApi {
 
       if (url.endsWith("/api/boards")) return json(boards);
 
-      if (url.endsWith("/api/tasks") && method === "GET") {
+      // GET /api/tasks（全件）と GET /api/boards/:id/tasks（ボードごと）の両方。
+      if (url.endsWith("/tasks") && method === "GET") {
         return failTasks ? new Response("", { status: 500 }) : json(tasks);
       }
 

@@ -40,11 +40,14 @@ describe("CSRFトークンが届くまで送信させない", () => {
     const api = installFakeApi({ tasks: [], holdCsrf: true });
     renderApp();
 
-    // 先に boards の到着を待つ。これを待たないと boardId が "" のままで、
-    // ボタンは csrf とは無関係に「準備中…」になる。
-    // 2026-11-17: 待たずに書いたせいで、csrf の判定を消してもテストが
-    // 緑のままだった（別の理由で通っていた）。
-    await screen.findByRole("option", { name: "テスト用ボード" });
+    // 先に画面の描画を待つ。待たずに書くと、ボタンは csrf とは無関係に
+    // 「準備中…」になっていて、csrf の判定を消しても緑のままになる
+    // （2026-11-17 に実際にそうなっていた）。
+    //
+    // 2026-11-18 に待つ対象を変えた。それまでは boards の <option> を
+    // 待っていたが、React Router を入れてボードを URL で決めるようにしたので
+    // <select> ごと無くなった。いまは見出し（ボード名）を待つ。
+    await screen.findByRole("heading", { name: "テスト用ボード" });
 
     const button = screen.getByRole("button", { name: /準備中/ });
     expect(button).toBeDisabled();
