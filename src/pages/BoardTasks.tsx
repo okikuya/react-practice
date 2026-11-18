@@ -1,8 +1,9 @@
 import { useState } from "react";
-import type { FormEvent } from "react";
 import { Link, useParams } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import TaskItem from "../TaskItem";
+import NewTaskForm from "../NewTaskForm";
+import type { NewTask } from "../NewTaskForm";
 import type { Task, Board } from "../types";
 import { getJson, sendJson } from "../api";
 
@@ -52,7 +53,6 @@ function BoardTasks() {
   });
   const csrfToken = csrf?.token ?? "";
 
-  const [text, setText] = useState("");
   const [actionError, setActionError] = useState<string | null>(null);
 
   const invalidateTasks = () =>
@@ -62,13 +62,18 @@ function BoardTasks() {
   // 自分で書いた .catch は、書き忘れても何も言われない（2026-11-17 に
   // addTask だけ直して toggleTask と deleteTask を2か所残していた）。
   const addMutation = useMutation({
-    mutationFn: (title: string) =>
+    mutationFn: (values: NewTask) =>
       sendJson("POST", `/api/boards/${boardId}/tasks`, csrfToken, {
-        task: { title },
+        // 空文字は送らない。送ると description: "" が保存されて、
+        // 「未入力」と「空文字を入れた」が区別できなくなる。
+        task: {
+          title: values.title,
+          description: values.description || null,
+          due_on: values.due_on || null,
+        },
       }),
     onSuccess: () => {
       setActionError(null);
-      setText("");
       invalidateTasks();
     },
     onError: (err) => setActionError(`追加できませんでした（${String(err)}）`),
@@ -108,12 +113,6 @@ function BoardTasks() {
     deleteMutation.mutate(id);
   };
 
-  const addTask = (e: FormEvent<HTMLFormElement>) => {
-    e.preventDefault();
-    if (text.trim() === "") return;
-    addMutation.mutate(text);
-  };
-
   // いま送信中のタスクはどれか。variables には最後に mutate へ渡した値が入る。
   const togglingId = toggleMutation.isPending
     ? toggleMutation.variables?.id
@@ -128,37 +127,42 @@ function BoardTasks() {
   //   0件          正常。ただし空
   const isEmpty = !loading && !tasksFailed && tasks.length === 0;
 
-  const canSubmit =
-    Boolean(csrfToken) && Boolean(boardId) && !addMutation.isPending;
+  // 送れない理由は2つあり、別物なので分けて渡す。
+  //   トークン未着 / ボード未確定 → ずっと送れない
+  //   送信中                      → 終われば送れる
+  const notReady = !csrfToken || !boardId;
 
   return (
     <>
-      <p>
-        <Link to="/">← ボード一覧</Link>
+      <p className="mb-2 text-sm">
+        <Link className="text-sky-700 underline" to="/">
+          ← ボード一覧
+        </Link>
       </p>
 
-      <h1>{board ? board.title : "タスク一覧"}</h1>
+      <h1 className="mb-4 text-2xl font-bold">
+        {board ? board.title : "タスク一覧"}
+      </h1>
 
       {csrfError && (
-        <p style={{ color: "crimson" }}>
+        <p className="mb-3 rounded bg-red-50 px-3 py-2 text-red-700">
           送信の準備に失敗しました（{csrfError.message}）。再読み込みしてください。
         </p>
       )}
       {tasksFailed && (
-        <p style={{ color: "crimson" }}>一覧を取得できませんでした。</p>
+        <p className="mb-3 rounded bg-red-50 px-3 py-2 text-red-700">
+          一覧を取得できませんでした。
+        </p>
       )}
-      {actionError && <p style={{ color: "crimson" }}>{actionError}</p>}
+      {actionError && (
+        <p className="mb-3 rounded bg-red-50 px-3 py-2 text-red-700">{actionError}</p>
+      )}
 
-      <form onSubmit={addTask}>
-        <input
-          value={text}
-          onChange={(e) => setText(e.target.value)}
-          placeholder="タスクを入力"
-        />
-        <button type="submit" disabled={!canSubmit}>
-          {addMutation.isPending ? "追加中…" : canSubmit ? "追加" : "準備中…"}
-        </button>
-      </form>
+      <NewTaskForm
+        onSubmit={(values) => addMutation.mutate(values)}
+        disabled={notReady}
+        pending={addMutation.isPending}
+      />
 
       {/*
         既定では失敗しても3回まで自動で再試行する（待ちは 1→2→4 秒）。
@@ -169,13 +173,17 @@ function BoardTasks() {
       */}
       {loading &&
         (tasksRetries > 0 ? (
-          <p>つながりません。再試行中…（{tasksRetries}回目）</p>
+          <p className="text-slate-500">
+            つながりません。再試行中…（{tasksRetries}回目）
+          </p>
         ) : (
-          <p>読み込み中…</p>
+          <p className="text-slate-500">読み込み中…</p>
         ))}
 
       {isEmpty && (
-        <p>タスクはまだありません。上のフォームから追加できます。</p>
+        <p className="text-slate-500">
+          タスクはまだありません。上のフォームから追加できます。
+        </p>
       )}
 
       {tasks.map((task) => (

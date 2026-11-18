@@ -20,19 +20,24 @@ function BoardList() {
 
   return (
     <>
-      <h1>ボード一覧</h1>
+      <h1 className="mb-4 text-2xl font-bold">ボード一覧</h1>
 
-      {loading && <p>読み込み中…</p>}
+      {loading && <p className="text-slate-500">読み込み中…</p>}
       {failed && (
-        <p style={{ color: "crimson" }}>ボードを取得できませんでした。</p>
+        <p className="text-red-700">ボードを取得できませんでした。</p>
       )}
-      {isEmpty && <p>ボードがありません。</p>}
+      {isEmpty && <p className="text-slate-500">ボードがありません。</p>}
 
-      <ul>
+      <ul className="divide-y divide-slate-200 border-y border-slate-200">
         {boards.map((board) => (
-          <li key={board.id}>
+          <li key={board.id} className="py-2">
             {/* <a href> だとページ全体が作り直される。Link は履歴だけ書き換える。 */}
-            <Link to={`/boards/${board.id}`}>{board.title}</Link>
+            <Link
+              className="text-sky-700 underline underline-offset-2 hover:text-sky-900"
+              to={`/boards/${board.id}`}
+            >
+              {board.title}
+            </Link>
           </li>
         ))}
       </ul>

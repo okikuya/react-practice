@@ -30,19 +30,30 @@ function TaskItem({ task, busy, onToggle, onDelete }: Props) {
   const disabled = !task.editable || busy
 
   return (
-    <div>
+    <div className="flex items-center gap-2 border-b border-slate-200 py-2">
       <input
         type="checkbox"
         checked={task.done}
         disabled={disabled}
+        className="size-4 disabled:opacity-40"
         onChange={() => onToggle(task.id)}
       />
-      <span>{task.title}</span>
-      <span>{task.done ? "完了" : "未完了"}</span>
-      <button onClick={() => onDelete(task.id)} disabled={disabled}>
+      <span className={task.done ? "flex-1 text-slate-400 line-through" : "flex-1"}>
+        {task.title}
+      </span>
+      <span className="text-xs text-slate-500">
+        {task.done ? "完了" : "未完了"}
+      </span>
+      <button
+        onClick={() => onDelete(task.id)}
+        disabled={disabled}
+        className="rounded border border-slate-300 px-2 py-1 text-xs hover:bg-slate-100 disabled:opacity-40"
+      >
         削除
       </button>
-      {!task.editable && <span>（他の人のタスク）</span>}
+      {!task.editable && (
+        <span className="text-xs text-slate-400">（他の人のタスク）</span>
+      )}
     </div>
   )
 }
